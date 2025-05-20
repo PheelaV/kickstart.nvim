@@ -557,65 +557,6 @@ local on_attach = function(_, bufnr)
 end
 
 -- document existing key chains
--- require('which-key').register {
---   ['<leader>c'] = { name = '[C]ode', _ = 'which_key_ignore' },
---   ['<leader>d'] = { name = '[D]ocument', _ = 'which_key_ignore' },
---   ['<leader>g'] = { name = '[G]it', _ = 'which_key_ignore' },
---   ['<leader>h'] = { name = 'Git [H]unk', _ = 'which_key_ignore' },
---   ['<leader>r'] = { name = '[R]ename', _ = 'which_key_ignore' },
---   ['<leader>s'] = { name = '[S]earch', _ = 'which_key_ignore' },
---   ['<leader>t'] = { name = '[T]oggle', _ = 'which_key_ignore' },
---   ['<leader>w'] = { name = '[W]orkspace', _ = 'which_key_ignore' },
--- }
--- require('which-key').register({
---   { "<leader>c", group = "[C]ode" },
---   { "<leader>c_", hidden = true },
---   { "<leader>d", group = "[D]ocument" },
---   { "<leader>d_", hidden = true },
---   { "<leader>g", group = "[G]it" },
---   { "<leader>g_", hidden = true },
---   { "<leader>h", group = "Git [H]unk" },
---   { "<leader>h_", hidden = true },
---   { "<leader>r", group = "[R]ename" },
---   { "<leader>r_", hidden = true },
---   { "<leader>s", group = "[S]earch" },
---   { "<leader>s_", hidden = true },
---   { "<leader>t", group = "[T]oggle" },
---   { "<leader>t_", hidden = true },
---   { "<leader>w", group = "[W]orkspace" },
---   { "<leader>w_", hidden = true },
--- })
--- document existing key chains
--- require('which-key').register({
---   { "<leader>c", group = "[C]ode" },
---   { "<leader>d", group = "[D]ocument" },
---   { "<leader>g", group = "[G]it" },
---   { "<leader>h", group = "Git [H]unk" },
---   { "<leader>r", group = "[R]ename" },
---   { "<leader>s", group = "[S]earch" },
---   { "<leader>t", group = "[T]oggle" },
---   { "<leader>w", group = "[W]orkspace" },
--- })
-
-
--- -- register which-key VISUAL mode
--- -- required for visual <leader>hs (hunk stage) to work
--- require('which-key').register({
---   ['<leader>'] = { name = 'VISUAL <leader>' },
---   ['<leader>h'] = { 'Git [H]unk' },
--- }, { mode = 'v' })
--- register which-key VISUAL mode
--- required for visual <leader>hs (hunk stage) to work
--- require('which-key').register({
---   ['<leader>'] = { name = 'VISUAL <leader>' },
---   ['<leader>h'] = { 'Git [H]unk' },
--- }, { mode = 'v' })
--- register which-key VISUAL mode
--- require('which-key').register({
---   { "<leader>", group = "VISUAL <leader>", mode = "v" },
---   { "<leader>h", desc = "Git [H]unk", mode = "v" },
--- })
--- document existing key chains
 local wk = require("which-key")
 wk.add({
   { "<leader>c", group = "[C]ode" },
@@ -634,6 +575,7 @@ wk.add({
   { "<leader>h", desc = "Git [H]unk", mode = "v" },
 })
 
+
 -- mason-lspconfig requires that these setup functions are called in this order
 -- before setting up the servers.
 require('mason').setup()
@@ -650,10 +592,32 @@ require('mason-lspconfig').setup()
 local servers = {
   -- clangd = {},
   -- gopls = {},
-  -- pyright = {},
   -- rust_analyzer = {},
   -- tsserver = {},
-  -- html = { filetypes = { 'html', 'twig', 'hbs'} },
+  html = { filetypes = { 'html', 'twig', 'hbs'} },
+  -- Python servers
+  pyright = {},  -- Microsoft's Python language server for type checking and intellisense
+  ruff = {       -- Ruff for linting, formatting, and import organization
+    init_options = {
+      settings = {
+        -- Configure Ruff settings here
+        lineLength = 88,  -- Match Black's default line length
+        indent = {
+          width = 2,      -- Match your 2-space indentation preference
+        },
+        format = {
+          quote = "double", -- Use single quotes instead of double quotes
+        },
+        lint = {
+          select = {"E", "F", "I"}, -- Error, Flake8, Isort rules
+        },
+      }
+    }
+  },
+  
+  -- Bash server
+  bashls = {},   -- Bash language server for shell scripts
+
 
   lua_ls = {
     Lua = {
@@ -706,6 +670,23 @@ for server_name, server_settings in pairs(servers) do
   
   lspconfig[server_name].setup(server_opts)
 end
+
+-- Ensure Pyright and Ruff do not clash
+vim.api.nvim_create_autocmd("LspAttach", {
+  callback = function(args)
+    local client = vim.lsp.get_client_by_id(args.data.client_id)
+    if client == nil then return end
+    
+    if client.name == "pyright" then
+      -- Let Ruff handle imports and formatting
+      client.server_capabilities.documentFormattingProvider = false
+      client.server_capabilities.documentRangeFormattingProvider = false
+    elseif client.name == "ruff" then
+      -- Let Pyright handle hover documentation
+      client.server_capabilities.hoverProvider = false
+    end
+  end,
+})
 
 
 -- [[ Configure nvim-cmp ]]
@@ -763,6 +744,44 @@ cmp.setup {
 require("toggleterm").setup{
 
 }
+
+-- Python-specific keymaps
+vim.api.nvim_create_autocmd("FileType", {
+  pattern = "python",
+  callback = function()
+    -- Local map function for buffer-specific keymaps
+    local map = function(mode, lhs, rhs, desc)
+      vim.keymap.set(mode, lhs, rhs, {buffer = true, desc = desc})
+    end
+    
+    -- Execute current Python file
+    map("n", "<leader>pe", ":!python %<CR>", "Python: Execute file")
+    
+    -- Format with Ruff
+    map("n", "<leader>pf", function() vim.lsp.buf.format() end, "Python: Format file")
+    
+    -- Organize imports with Ruff
+    map("n", "<leader>pi", function()
+      local params = vim.lsp.util.make_range_params()
+      params.context = {only = {"source.organizeImports.ruff"}}
+      vim.lsp.buf_request_sync(0, "textDocument/codeAction", params, 1000)
+    end, "Python: Organize imports")
+  end
+})
+
+wk.add({
+  -- Add Python group
+  { "<leader>p", group = "[P]ython" },
+  -- Python specific commands
+  { "<leader>pe", desc = "Execute Python file" },
+  { "<leader>pf", desc = "Format Python file" },
+  { "<leader>pi", desc = "Organize imports" },
+  { "<leader>pv", desc = "Choose virtualenv" },
+  { "<leader>pd", desc = "Show current virtualenv" },
+  { "<leader>pt", desc = "Run nearest test" },
+  { "<leader>pT", desc = "Run file tests" },
+  { "<leader>ps", desc = "Toggle test summary" },
+})
 
 -- The line beneath this is called `modeline`. See `:help modeline`
 -- vim: ts=2 sts=2 sw=2 et
